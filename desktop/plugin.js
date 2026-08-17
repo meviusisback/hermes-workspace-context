@@ -1,55 +1,24 @@
 /**
- * workspace-context — DEBUG BUILD (diagnostic only, not for publish).
+ * workspace-context — DEFINITIVE DEBUG BUILD.
  *
- * Renders the context strip PLUS live diagnostics so we can see, in the UI,
- * what gateway events actually reach the plugin and what session ids they
- * carry on a session switch. Console.log from plugins is unreliable (often
- * routed to the app's own log viewer, not devtools), so we surface the data
- * in the strip itself.
- *
- * Remove the debug overlay once the real fix lands.
+ * Renders, in the strip, exactly what the plugin SDK exposes in THIS app
+ * build — so we stop guessing. Shows:
+ *   - whether host.state.focusedUsage / focusedSessionId / activeSessionId exist
+ *   - the live focusedUsage value (if the atom exists)
+ *   - whether host.onEvent('*') ever fires (event counter)
+ * No console needed; everything is in the strip.
  */
 
-import { host, COMPOSER_AREAS } from '@hermes/plugin-sdk'
+import { host, COMPOSER_AREAS, useValue } from '@hermes/plugin-sdk'
 import { useState, useEffect } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'workspace-context'
-const GLOBAL_KEY = '_global'
 
-function extractUsage(event) {
-  if (!event) return null
-  const candidates = [
-    event.usage,
-    event.payload?.usage,
-    event.payload,
-    event.data?.usage,
-    event.data
-  ]
-  for (const c of candidates) {
-    if (c && (c.context_used != null || c.context_max != null || c.context_percent != null)) {
-      return c
-    }
-  }
-  return null
-}
-
-function extractSessionId(event) {
-  return (
-    event?.session_id ||
-    event?.sessionId ||
-    event?.payload?.session_id ||
-    event?.payload?.sessionId ||
-    event?.payload?.stored_session_id ||
-    event?.data?.session_id ||
-    event?.data?.sessionId ||
-    null
-  )
-}
-
-function isValid(u) {
-  return u && typeof u.context_max === 'number' && u.context_max > 0
-}
+// Module-level: constant across renders, so calling useValue conditionally is safe.
+const HAS_FOCUSED_USAGE = !!(host.state && host.state.focusedUsage)
+const HAS_FOCUSED_SID = !!(host.state && host.state.focusedSessionId)
+const HAS_ACTIVE_SID = !!(host.state && host.state.activeSessionId)
 
 function fmt(n) {
   if (!n) return '0'
@@ -64,47 +33,29 @@ function UsageBar({ pct }) {
   const cells = []
   for (let i = 0; i < segs; i++) {
     cells.push(
-      jsx('span', {
-        key: i,
-        className: i < filled ? 'text-(--ui-accent)' : 'text-(--ui-stroke-secondary)',
-        children: '▮'
-      })
+      jsx('span', { key: i, className: i < filled ? 'text-(--ui-accent)' : 'text-(--ui-stroke-secondary)', children: '▮' })
     )
   }
   return jsx('span', { className: 'inline-flex items-center gap-px align-middle select-none', style: { width: '34px' }, children: cells })
 }
 
 function ContextStrip() {
-  // Live diagnostics, rendered in the strip.
-  const [diag, setDiag] = useState({ n: 0, lastType: '-', lastSid: '-', hasUsage: false })
-  const [activeSid, setActiveSid] = useState(GLOBAL_KEY)
-  const [usages, setUsages] = useState({})
+  const fu = HAS_FOCUSED_USAGE ? useValue(host.state.focusedUsage) : null
+  const [evtCount, setEvtCount] = useState(0)
 
   useEffect(() => {
-    // '*' catches EVERY event type the plugin tap forwards.
-    const dispose = host.onEvent('*', (event) => {
-      const sid = extractSessionId(event) || '-'
-      const u = extractUsage(event)
-      setDiag((d) => ({
-        n: d.n + 1,
-        lastType: event?.type || '?',
-        lastSid: sid,
-        hasUsage: !!u
-      }))
-      if (event?.type === 'session.info') {
-        setActiveSid(sid)
-        if (isValid(u)) setUsages((prev) => ({ ...prev, [sid]: u }))
-      }
-    })
+    const dispose = host.onEvent('*', () => setEvtCount((c) => c + 1))
     return () => {
       if (typeof dispose === 'function') dispose()
     }
   }, [])
 
-  const usage = usages[activeSid] || null
-  const used = usage?.context_used ?? 0
-  const max = usage?.context_max ?? 0
-  const pct = usage?.context_percent ?? (max ? Math.round((used / max) * 100) : 0)
+  const used = fu?.context_used ?? 0
+  const max = fu?.context_max ?? 0
+  const pct = fu?.context_percent ?? (max ? Math.round((used / max) * 100) : 0)
+
+  // Diagnostic header line.
+  const diag = `fU=${HAS_FOCUSED_USAGE ? 'Y' : 'n'} fS=${HAS_FOCUSED_SID ? 'Y' : 'n'} aS=${HAS_ACTIVE_SID ? 'Y' : 'n'} evt=${evtCount}`
 
   return jsx('div', {
     className: 'flex items-center gap-2 px-3 py-1.5 text-xs bg-(--ui-bg-card) font-mono',
@@ -112,10 +63,7 @@ function ContextStrip() {
       className: 'flex items-center gap-1.5',
       children: [
         jsx('span', { className: 'text-(--ui-text-quaternary)', children: 'Context:' }),
-        jsx('span', {
-          className: 'text-(--ui-text-secondary)',
-          children: `n=${diag.n} type=${diag.lastType} sid=${diag.lastSid} usage=${diag.hasUsage ? 'Y' : 'n'}`
-        }),
+        jsx('span', { className: 'text-(--ui-text-secondary)', children: diag }),
         max
           ? jsxs('span', {
               className: 'flex items-center gap-1.5',
@@ -134,13 +82,9 @@ function ContextStrip() {
 export default {
   id: ID,
   name: 'Workspace Context',
-  description: 'DEBUG build — shows context usage plus event diagnostics.',
+  description: 'DEBUG: introspect host.state + onEvent in this app build.',
   defaultEnabled: true,
   register(ctx) {
-    ctx.register({
-      id: 'composer-strip',
-      area: COMPOSER_AREAS.top,
-      render: () => jsx(ContextStrip, {})
-    })
+    ctx.register({ id: 'composer-strip', area: COMPOSER_AREAS.top, render: () => jsx(ContextStrip, {}) })
   }
 }
