@@ -95,7 +95,7 @@ function UsageBar({ pct }) {
       })
     )
   }
-  return jsx('span', { className: 'inline-flex items-center gap-px align-middle', style: { width: '34px' }, children: cells })
+  return jsx('span', { className: 'inline-flex items-center gap-px align-middle select-none', style: { width: '34px' }, children: cells })
 }
 
 function ContextStrip({ ctx }) {
@@ -104,7 +104,10 @@ function ContextStrip({ ctx }) {
     return stored && typeof stored === 'object' ? stored : {}
   })
   // Re-render when the focused/active session changes (so we switch keys).
-  const sid = SID_ATOM ? useValue(SID_ATOM) : GLOBAL_KEY
+  // useValue() can return undefined when the atom is unpopulated; fall back
+  // to the global slot so the strip still renders.
+  const rawSid = SID_ATOM ? useValue(SID_ATOM) : null
+  const sid = rawSid || GLOBAL_KEY
 
   useEffect(() => {
     // The gateway emits 'session.info' with the per-session UsageStats the
@@ -117,7 +120,11 @@ function ContextStrip({ ctx }) {
       if (!key) return
       setUsages((prev) => {
         const next = trimUsages({ ...prev, [key]: u })
-        ctx.storage.set('usages', next)
+        try {
+          ctx.storage.set('usages', next)
+        } catch (_) {
+          // Storage is best-effort; never let a write failure break the strip.
+        }
         return next
       })
     })
@@ -129,7 +136,12 @@ function ContextStrip({ ctx }) {
   const max = usage?.context_max ?? 0
   const pct = usage?.context_percent ?? (max ? Math.round((used / max) * 100) : 0)
 
-  const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n || 0))
+  const fmt = (n) => {
+    if (!n) return '0'
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+    return String(n)
+  }
 
   return jsx('div', {
     className: 'flex items-center gap-2 px-3 py-1.5 text-xs bg-(--ui-bg-card) font-mono',
