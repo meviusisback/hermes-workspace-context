@@ -99,13 +99,17 @@ function ContextStrip() {
     }
   }, [sid, busy])
 
-  // The breakdown wins when it matches the current session. Otherwise we fall
-  // back to the streamed usage alone.
+  // The breakdown wins when it matches the current session. When idle (not
+  // busy) and no breakdown yet, show EMPTY — never fall back to streamed
+  // context_* because the store MERGES rather than REPLACES, so those fields
+  // can be stale from a PREVIOUS session. Only use streamed context_* mid-turn
+  // (busy), where the stream is the live, authoritative source.
   const breakdown = fetched && fetched.sessionId === sid ? fetched : null
+  const showStreamed = busy && streamed
 
-  const used = breakdown?.context_used ?? streamed?.context_used ?? 0
-  const max = breakdown?.context_max ?? streamed?.context_max ?? 0
-  const pct = breakdown?.context_percent ?? streamed?.context_percent ?? (max ? Math.round((used / max) * 100) : 0)
+  const used = breakdown?.context_used ?? (showStreamed ? streamed.context_used : 0)
+  const max = breakdown?.context_max ?? (showStreamed ? streamed.context_max : 0)
+  const pct = breakdown?.context_percent ?? (showStreamed ? streamed.context_percent : (max ? Math.round((used / max) * 100) : 0))
 
   return jsx('div', {
     className: 'flex items-center gap-2 px-3 py-1.5 text-xs bg-(--ui-bg-card) font-mono',
