@@ -128,16 +128,23 @@ function ContextStrip({ ctx }) {
     // extractUsage still deep-searches the event. Likewise the session id
     // can sit in a few slots, so extractSessionId checks them all.)
     const dispose = host.onEvent('session.info', (event) => {
+      const sid = extractSessionId(event) || GLOBAL_KEY
+      // Follow the focused session even when its usage is empty/zero. An empty
+      // session must read empty — never borrow another session's value.
+      setActiveSid(sid)
+      try {
+        ctx.storage.set('activeSid', sid)
+      } catch (_) {
+        // Storage is best-effort; never let a write failure break the strip.
+      }
+
       const u = extractUsage(event)
       if (!isValid(u)) return
 
-      const sid = extractSessionId(event) || GLOBAL_KEY
-      setActiveSid(sid)
       setUsages((prev) => {
         const next = trimUsages({ ...prev, [sid]: u })
         try {
           ctx.storage.set('usages', next)
-          ctx.storage.set('activeSid', sid)
         } catch (_) {
           // Storage is best-effort; never let a write failure break the strip.
         }
@@ -150,7 +157,9 @@ function ContextStrip({ ctx }) {
     }
   }, [ctx])
 
-  const usage = usages[activeSid] || usages[GLOBAL_KEY] || null
+  // Show only the focused session's OWN data. If it has none recorded, read
+  // empty — never fall back to another session's number.
+  const usage = usages[activeSid] || null
   const used = usage?.context_used ?? 0
   const max = usage?.context_max ?? 0
   const pct = usage?.context_percent ?? (max ? Math.round((used / max) * 100) : 0)
