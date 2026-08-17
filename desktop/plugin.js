@@ -8,16 +8,21 @@
  * stream the core status bar reads. We subscribe to 'session.info', the
  * event that carries the per-session UsageStats (context_used /
  * context_max / context_percent); extractUsage deep-searches the event
- * because builds have nested the fields in a few different slots.
+ * because builds nest the fields in a few different slots.
  *
- * The reading is KEYED BY THE ACTIVE SESSION, using the app's own session
- * atom (host.state.focusedSessionId, falling back to activeSessionId) — the
- * same source the status bar tracks, so switching sessions shows that
- * session's own numbers. A single global key is used as a last-resort
- * fallback if neither atom is exposed by the build. A reading is only
- * accepted when context_max is a positive number, so an empty/draft-session
- * event can never blank a real value. Per-session values persist in plugin
- * storage (capped) so a remount/hot-reload restores each session correctly.
+ * KEYING — IMPORTANT: we do NOT rely on host.state.*SessionId atoms. The
+ * desktop plugin SDK exposes only a partial host.state surface (e.g.
+ * focusedUsage is absent and reading it crashes), and the session-id atoms
+ * are not reliably live. Instead we read the session id carried directly in
+ * each 'session.info' event (event.session_id / payload.stored_session_id /
+ * …). Storage AND display are both keyed by that id, so switching sessions
+ * tracks correctly: the gateway emits a fresh session.info for the focused
+ * session on switch, updating both the stored value and the active key.
+ *
+ * A reading is only accepted when context_max is a positive number, so an
+ * empty/draft-session event can never blank a real value. Per-session values
+ * (and the active session id) persist in plugin storage (capped) so a
+ * remount/hot-reload restores each session correctly.
  *
  * When no usage is available the strip shows just "Context:" — nothing else.
  *
@@ -30,12 +35,13 @@
  * react/jsx-runtime. UI is jsx() calls, not JSX syntax.
  */
 
-import { host, COMPOSER_AREAS, useValue } from '@hermes/plugin-sdk'
+import { host, COMPOSER_AREAS } from '@hermes/plugin-sdk'
 import { useState, useEffect } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'workspace-context'
 const MAX_SESSIONS = 30 // bound plugin storage; trim oldest beyond this
+const GLOBAL_KEY = '_global'
 
 // Pull UsageStats out of an event regardless of where the build nested it.
 function extractUsage(event) {
@@ -55,21 +61,27 @@ function extractUsage(event) {
   return null
 }
 
+// The session id travels WITH the session.info event. Prefer the explicit
+// session_id; fall back through the slots builds have used. Returns null if
+// none is present (caller falls back to the global slot).
+function extractSessionId(event) {
+  return (
+    event?.session_id ||
+    event?.sessionId ||
+    event?.payload?.session_id ||
+    event?.payload?.sessionId ||
+    event?.payload?.stored_session_id ||
+    event?.data?.session_id ||
+    event?.data?.sessionId ||
+    null
+  )
+}
+
 // A reading is only worth keeping if it describes a real, sized context
 // window. Empty/draft-session events (context_max === 0) would otherwise
 // blank a genuine value, and — worse — get persisted, sticking across reloads.
 function isValid(u) {
   return u && typeof u.context_max === 'number' && u.context_max > 0
-}
-
-// Which atom names the active/focused session. Prefer focused, fall back to
-// active; if neither exists in this build we key on a single global slot.
-const SID_ATOM = host.state.focusedSessionId || host.state.activeSessionId || null
-const GLOBAL_KEY = '_global'
-
-function currentSid() {
-  if (SID_ATOM && typeof SID_ATOM.get === 'function') return SID_ATOM.get() || GLOBAL_KEY
-  return GLOBAL_KEY
 }
 
 // Trim a usages map to at most MAX_SESSIONS entries, dropping the oldest
@@ -103,35 +115,42 @@ function ContextStrip({ ctx }) {
     const stored = ctx.storage.get('usages', {})
     return stored && typeof stored === 'object' ? stored : {}
   })
-  // Re-render when the focused/active session changes (so we switch keys).
-  // useValue() can return undefined when the atom is unpopulated; fall back
-  // to the global slot so the strip still renders.
-  const rawSid = SID_ATOM ? useValue(SID_ATOM) : null
-  const sid = rawSid || GLOBAL_KEY
+  // The session we currently display. Driven by the events themselves (not a
+  // host.state atom), so it follows UI session switches.
+  const [activeSid, setActiveSid] = useState(() => {
+    const s = ctx.storage.get('activeSid', GLOBAL_KEY)
+    return typeof s === 'string' ? s : GLOBAL_KEY
+  })
 
   useEffect(() => {
     // The gateway emits 'session.info' with the per-session UsageStats the
-    // status bar paints. (Earlier builds nested usage in a few different
-    // slots, so extractUsage still deep-searches the event.)
+    // status bar paints. (Builds nest usage in a few different slots, so
+    // extractUsage still deep-searches the event. Likewise the session id
+    // can sit in a few slots, so extractSessionId checks them all.)
     const dispose = host.onEvent('session.info', (event) => {
       const u = extractUsage(event)
       if (!isValid(u)) return
-      const key = currentSid()
-      if (!key) return
+
+      const sid = extractSessionId(event) || GLOBAL_KEY
+      setActiveSid(sid)
       setUsages((prev) => {
-        const next = trimUsages({ ...prev, [key]: u })
+        const next = trimUsages({ ...prev, [sid]: u })
         try {
           ctx.storage.set('usages', next)
+          ctx.storage.set('activeSid', sid)
         } catch (_) {
           // Storage is best-effort; never let a write failure break the strip.
         }
         return next
       })
     })
-    return dispose
-  }, [])
 
-  const usage = usages[sid] || usages[GLOBAL_KEY] || null
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, [ctx])
+
+  const usage = usages[activeSid] || usages[GLOBAL_KEY] || null
   const used = usage?.context_used ?? 0
   const max = usage?.context_max ?? 0
   const pct = usage?.context_percent ?? (max ? Math.round((used / max) * 100) : 0)
