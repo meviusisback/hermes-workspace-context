@@ -1,0 +1,6 @@
+name: workspace-context
+label: Workspace Context
+description: Shows the active session context-window usage (used / total + a percentage bar) above the desktop composer.
+version: 1.1.0
+# Desktop-only plugin (no backend). The composer strip reads live UsageStats
+# from the gateway event stream via the plugin SDK — no dashboard API needed.
