@@ -128,6 +128,15 @@ function ContextStrip({ ctx }) {
     // extractUsage still deep-searches the event. Likewise the session id
     // can sit in a few slots, so extractSessionId checks them all.)
     const dispose = host.onEvent('session.info', (event) => {
+      // DEBUG (temporary): dump what each event actually carries on switch.
+      console.log('[workspace-context DEBUG] session.info', {
+        topSessionId: event?.session_id,
+        payloadSessionId: event?.payload?.session_id,
+        storedSessionId: event?.payload?.stored_session_id,
+        hasUsage: !!(event?.usage || event?.payload?.usage || event?.payload?.context_used != null || event?.payload?.context_max != null),
+        activeSid
+      })
+
       const sid = extractSessionId(event) || GLOBAL_KEY
       // Follow the focused session even when its usage is empty/zero. An empty
       // session must read empty — never borrow another session's value.
