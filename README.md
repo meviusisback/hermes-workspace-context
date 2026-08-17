@@ -6,6 +6,10 @@ A [Hermes Agent](https://github.com/NousResearch/hermes-agent) desktop plugin th
 Context: 42.2K / 256K  16%  ▮▮▯▯▯▯▯▯▯▯▯▯▯
 ```
 
+![workspace-context strip above the composer](screenshot.png)
+
+*The strip shows the active session's live context usage — here `110.9K / 256K (43%)` with a segmented bar — sitting above the composer controls.*
+
 ## What it does
 
 - Renders a compact, monospace readout above the composer: `used / total`, a percentage, and a segmented bar.
@@ -25,7 +29,7 @@ hermes plugins install workspace-context
 Or manually:
 
 1. Download `plugin.yaml` and `desktop/plugin.js` from this repo.
-2. Place them at `<HERMES_HOME>/plugins/workspace-context/` so the layout is:
+2. Place them at `<HERMER_HOME>/plugins/workspace-context/` so the layout is:
    ```
    workspace-context/
    ├── plugin.yaml
@@ -39,7 +43,9 @@ Or manually:
 
 > The standalone `desktop-plugins/` door also works: drop the folder at
 > `<HERMES_HOME>/desktop-plugins/workspace-context/` (with `plugin.js` at the
-> root) — it's default-on and needs no `plugins.enabled` entry.
+> root) — it's default-on and needs no `plugins.enabled` entry. On macOS, copy
+> `desktop/plugin.js` to the folder root rather than symlinking; some app
+> sandboxes won't follow the symlink.
 
 ## How it works
 
@@ -65,6 +71,7 @@ workspace-context/
 ├── plugin.yaml      # manifest (name, description, version; desktop-only, no backend)
 ├── desktop/
 │   └── plugin.js    # the plugin
+├── screenshot.png   # preview shown in this README
 └── README.md
 ```
 
