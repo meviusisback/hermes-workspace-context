@@ -52,17 +52,19 @@ Or manually:
 The plugin is a single ESM file (`desktop/plugin.js`) loaded by the Hermes
 desktop plugin runtime. It uses only the public plugin SDK:
 
-- `host.onEvent('session.info', …)` — subscribes to the per-session
-  `UsageStats` stream (deep-searches the event for `context_used` /
-  `context_max` / `context_percent`, since builds nest them differently).
-- `host.state.focusedSessionId` (falling back to `activeSessionId`) — keys the
-  reading to the focused session.
-- `host.storage` — persists per-session usage, capped, so storage can't grow
-  without bound.
+- `host.state.focusedUsage` — the live streamed usage snapshot, updated by
+  the backend mid-turn. Authoritative while a turn is running.
+- `host.state.focusedSessionId` — keys the breakdown RPC to the focused session.
+- `host.request('session.context_breakdown', { session_id })` — estimates
+  context occupancy from the system prompt + tools + transcript. Fetched
+  when the session is idle (not mid-turn, where the stream is authoritative).
+  The result's `context_used` / `context_max` / `context_percent` fields
+  override the streamed usage's matching fields, preventing stale values
+  from carrying over after a session switch.
 - `COMPOSER_AREAS.top` — mounts the strip above the composer.
 
-A reading is only accepted when `context_max > 0`, so an empty/draft-session
-event can never blank a real value.
+All three breakdown fields must be finite numbers before they are accepted,
+so a partial or malformed response can never paint the strip with garbage.
 
 ## Layout
 
