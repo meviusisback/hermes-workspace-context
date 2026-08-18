@@ -85,7 +85,13 @@ function ContextStrip() {
     host
       .request('session.context_breakdown', { session_id: sid })
       .then((b) => {
-        if (!cancelled && b && typeof b.context_max === 'number') {
+        if (
+          !cancelled &&
+          b &&
+          typeof b.context_max === 'number' &&
+          Number.isFinite(b.context_used) &&
+          Number.isFinite(b.context_percent)
+        ) {
           setFetched({ ...b, sessionId: sid })
         }
       })
